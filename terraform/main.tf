@@ -1,171 +1,124 @@
-locals {
-  resource_group_name= "app-grp"
-  location="North Europe"
-  virtual_network={
-    name="app-network"
-    address_space="10.0.0.0/16"
-   }
-   subnets = [
-    { 
-      name="subnetA"
-      address_prefix = "10.0.0.0/24"
-    },
-    {
-      name ="subnetB"
-      address_prefix = "10.0.1.0/24"
-    }
-   ]
-
-}
-resource "azurerm_resource_group" "appgrp" {
-  name     = local.resource_group_name
-  location = local.location
+resource "random_pet" "rg_name" {
+  prefix = var.resource_group_name_prefix
 }
 
-resource "azurerm_virtual_network" "appnetwork" {
-  name                = local.virtual_network.name
-  location            = local.location
-  resource_group_name = "app-grp"
-  address_space       = [local.virtual_network.address_space]
-  depends_on = [ 
-    azurerm_resource_group.appgrp 
-    ]
+resource "azurerm_resource_group" "rg" {
+  location = var.resource_group_location
+  name     = random_pet.rg_name.id
 }
 
-resource "azurerm_subnet" "subnetA" {
-  name                 = local.subnets[0].name
-  resource_group_name  = local.resource_group_name
-  virtual_network_name = local.virtual_network.name
-  address_prefixes     = [local.subnets[0].address_prefix]
-  depends_on = [
-    azurerm_virtual_network.appnetwork
-   ]
+# Create virtual network
+resource "azurerm_virtual_network" "my_terraform_network" {
+  name                = "myVnet"
+  address_space       = ["10.0.0.0/16"]
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
 }
 
-resource "azurerm_subnet" "subnetB" {
-  name                 = local.subnets[1].name
-  resource_group_name  = local.resource_group_name
-  virtual_network_name = local.virtual_network.name
-  address_prefixes     = [local.subnets[1].address_prefix]
-  depends_on = [ 
-    azurerm_virtual_network.appnetwork
-   ]
+# Create subnet
+resource "azurerm_subnet" "my_terraform_subnet" {
+  name                 = "mySubnet"
+  resource_group_name  = azurerm_resource_group.rg.name
+  virtual_network_name = azurerm_virtual_network.my_terraform_network.name
+  address_prefixes     = ["10.0.1.0/24"]
 }
 
-resource "azurerm_network_interface" "appinterface" {
-  name                = "appinterface"
-  location            = local.location
-  resource_group_name = local.resource_group_name
-
-  ip_configuration {
-    name                          = "internal"
-    subnet_id                     = azurerm_subnet.subnetA.id
-    private_ip_address_allocation = "Dynamic"
-    public_ip_address_id = azurerm_public_ip.appip.id
-  }
-  depends_on = [ 
-    azurerm_subnet.subnetA
-   ]
-}
-output "subnets" {
-  value=azurerm_virtual_network.appnetwork.subnet
-  
+# Create public IPs
+resource "azurerm_public_ip" "my_terraform_public_ip" {
+  name                = "myPublicIP"
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+  allocation_method   = "Dynamic"
 }
 
-resource "azurerm_public_ip" "appip" {
-  name                = "app-ip"
-  resource_group_name = local.resource_group_name
-  location            = local.location
-  allocation_method   = "Static"
-  depends_on = [
-    azurerm_resource_group.appgrp
-   ]
-}
-
-resource "azurerm_network_security_group" "appnsg" {
-  name                = "app-nsg"
-  location            = local.location
-  resource_group_name = local.resource_group_name
+# Create Network Security Group and rule
+resource "azurerm_network_security_group" "my_terraform_nsg" {
+  name                = "myNetworkSecurityGroup"
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
 
   security_rule {
-    name                       = "AllowRDP"
-    priority                   = 300
+    name                       = "SSH"
+    priority                   = 1001
     direction                  = "Inbound"
     access                     = "Allow"
     protocol                   = "Tcp"
     source_port_range          = "*"
-    destination_port_range     = "3389"
+    destination_port_range     = "22"
     source_address_prefix      = "*"
     destination_address_prefix = "*"
   }
-  depends_on = [
-    azurerm_resource_group.appgrp
-   ]
 }
 
-resource "azurerm_subnet_network_security_group_association" "appnsglink" {
-  subnet_id                 = azurerm_subnet.subnetA.id
-  network_security_group_id = azurerm_network_security_group.appnsg.id
+# Create network interface
+resource "azurerm_network_interface" "my_terraform_nic" {
+  name                = "myNIC"
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+
+  ip_configuration {
+    name                          = "my_nic_configuration"
+    subnet_id                     = azurerm_subnet.my_terraform_subnet.id
+    private_ip_address_allocation = "Dynamic"
+    public_ip_address_id          = azurerm_public_ip.my_terraform_public_ip.id
+  }
 }
 
-resource "azurerm_windows_virtual_machine" "appvm" {
-  name                = "appvm"
-  resource_group_name = local.resource_group_name
-  location            = local.location
-  size                = "Standard_Ds1_v2"
-  admin_username      = "adminuser"
-  admin_password      = "Azure@123"
-  network_interface_ids = [
-    azurerm_network_interface.appinterface.id,
-    azurerm_network_interface.secondaryinterface.id
-  ]
+# Connect the security group to the network interface
+resource "azurerm_network_interface_security_group_association" "example" {
+  network_interface_id      = azurerm_network_interface.my_terraform_nic.id
+  network_security_group_id = azurerm_network_security_group.my_terraform_nsg.id
+}
+
+# Generate random text for a unique storage account name
+resource "random_id" "random_id" {
+  keepers = {
+    # Generate a new ID only when a new resource group is defined
+    resource_group = azurerm_resource_group.rg.name
+  }
+
+  byte_length = 8
+}
+
+# Create storage account for boot diagnostics
+resource "azurerm_storage_account" "my_storage_account" {
+  name                     = "diag${random_id.random_id.hex}"
+  location                 = azurerm_resource_group.rg.location
+  resource_group_name      = azurerm_resource_group.rg.name
+  account_tier             = "Standard"
+  account_replication_type = "LRS"
+}
+
+# Create virtual machine
+resource "azurerm_linux_virtual_machine" "my_terraform_vm" {
+  name                  = "myVM"
+  location              = azurerm_resource_group.rg.location
+  resource_group_name   = azurerm_resource_group.rg.name
+  network_interface_ids = [azurerm_network_interface.my_terraform_nic.id]
+  size                  = "Standard_DS1_v2"
 
   os_disk {
+    name                 = "myOsDisk"
     caching              = "ReadWrite"
-    storage_account_type = "Standard_LRS"
+    storage_account_type = "Premium_LRS"
   }
 
   source_image_reference {
-    publisher = "MicrosoftWindowsServer"
-    offer     = "WindowsServer"
-    sku       = "2019-Datacenter"
+    publisher = "Canonical"
+    offer     = "0001-com-ubuntu-server-jammy"
+    sku       = "22_04-lts-gen2"
     version   = "latest"
   }
-  depends_on = [
-    azurerm_network_interface.appinterface,
-    azurerm_network_interface.secondaryinterface,
-    azurerm_resource_group.appgrp
-  ]
-}
 
-resource "azurerm_network_interface" "secondaryinterface" {
-  name                = "secondaryinterface"
-  location            = local.location
-  resource_group_name = local.resource_group_name
+  computer_name  = "hostname"
+  admin_username = var.username
 
-  ip_configuration {
-    name                          = "internal"
-    subnet_id                     = azurerm_subnet.subnetA.id
-    private_ip_address_allocation = "Dynamic"
+  admin_ssh_key {
+    username   = var.username
+    public_key = azapi_resource_action.ssh_public_key_gen.output.publicKey
   }
-  depends_on = [ 
-    azurerm_subnet.subnetA
-   ]
-}
 
-resource "azurerm_managed_disk" "appdisk" {
-  name                 = "appdisk"
-  location             = local.location
-  resource_group_name  = local.resource_group_name
-  storage_account_type = "Standard_LRS"
-  create_option        = "Empty"
-  disk_size_gb         = "16"
-
-}
-
-resource "azurerm_virtual_machine_data_disk_attachment" "appdiskattach" {
-  managed_disk_id    = azurerm_managed_disk.appdisk.id
-  virtual_machine_id = azurerm_windows_virtual_machine.appvm.id
-  lun                = "0"
-  caching            = "ReadWrite"
+  boot_diagnostics {
+    storage_account_uri = azurerm_storage_account.my_storage_account.primary_blob_endpoint
+  }
 }
