@@ -25,6 +25,11 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
 
+    - name: HashiCorp - Setup Terraform
+      uses: hashicorp/setup-terraform@master
+      with:
+        terraform_wrapper: false
+
     - name: 'Terraform Format'
       uses: hashicorp/terraform-github-actions@master
       with:
